@@ -1,13 +1,8 @@
 <template>
   <div id="app">
-    <el-container>
-      <el-header class="header">
-        <h1>SeeAI 积分管理系统</h1>
-      </el-header>
-      <el-main>
-        <Leaderboard />
-      </el-main>
-    </el-container>
+    <div class="app-main">
+      <Leaderboard />
+    </div>
   </div>
 </template>
 
@@ -24,14 +19,20 @@ import Leaderboard from './views/Leaderboard.vue'
 #app {
   min-height: 100vh;
 }
-.header {
-  background-color: #409eff;
-  color: white;
+.app-header {
+  background: white;
+  color: #3da742;
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 15px 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
-.header h1 {
+.app-header h1 {
   font-size: 24px;
+  font-weight: 700;
+}
+.app-main {
+  padding: 0;
 }
 </style>

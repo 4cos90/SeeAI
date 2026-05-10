@@ -1,15 +1,6 @@
 FROM python:3.11-slim
 
-LABEL maintainer="SeeAI"
-LABEL description="SeeAI Backend API"
-
 WORKDIR /app
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    gcc \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 

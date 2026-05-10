@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build: ./backend
@@ -8,6 +6,8 @@ services:
     environment:
       - FEISHU_APP_ID=${FEISHU_APP_ID}
       - FEISHU_APP_SECRET=${FEISHU_APP_SECRET}
+      - FEISHU_APP_TOKEN=${FEISHU_APP_TOKEN}
+      - FEISHU_TABLE_ID=${FEISHU_TABLE_ID}
     restart: unless-stopped
     networks:
       - seeai-network

@@ -72,3 +72,26 @@ npm run dev
 3. 获取 `App ID` 和 `App Secret`
 4. 配置应用权限（根据实际数据源配置）
 5. 将凭证填入 `.env` 文件
+
+### 飞书多维表格配置
+
+如果你使用的是飞书多维表格作为数据源，还需要配置以下信息：
+
+1. **App Token（多维表格ID）**: 
+   - 打开多维表格
+   - 从浏览器地址栏复制 URL 中的 `base/` 后面的部分
+   - 例如：`https://bytedance.feishu.cn/base/DjMCbxRJLaCsABsw6Rsc5KFnneb`
+   - App Token 就是 `DjMCbxRJLaCsABsw6Rsc5KFnneb`
+
+2. **Table ID（数据表ID）**:
+   - 在多维表格中，点击表格名称旁边的设置按钮
+   - 选择"复制数据表链接"或查看数据表 ID
+   - 通常以 `tbl` 开头，例如：`tblpIelIoQCiD33w`
+
+3. **环境变量配置**:
+   ```bash
+   FEISHU_APP_ID=cli_xxxxxxxxxxxxxx      # 应用 ID
+   FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxx   # 应用密钥
+   FEISHU_APP_TOKEN=DjMCbxRJLaCsABsw6Rsc5KFnneb  # 多维表格 ID
+   FEISHU_TABLE_ID=tblxxxxxxxxxxxx        # 数据表 ID
+   ```

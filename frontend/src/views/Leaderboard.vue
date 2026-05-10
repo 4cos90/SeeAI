@@ -5,12 +5,13 @@
     <div class="header">
       <div class="decorative-element"></div>
       <h1>积分排行榜</h1>
-      <div class="month-selector">
-        <h2>2026年
-          <el-select v-model="selectedMonth" placeholder="选择月份" size="large" @change="handleMonthChange">
-            <el-option v-for="month in availableMonths" :key="month" :label="month" :value="month" />
-          </el-select>
-        </h2>
+      <div class="selector-group">
+        <el-select v-model="selectedYear" placeholder="选择年份" size="large" @change="handleYearChange">
+          <el-option v-for="year in availableYears" :key="year" :label="year + '年'" :value="year" />
+        </el-select>
+        <el-select v-model="selectedMonth" placeholder="选择月份" size="large" @change="handleMonthChange">
+          <el-option v-for="month in availableMonths" :key="month" :label="month" :value="month" />
+        </el-select>
       </div>
       <p>激励创新与协作学习 | Inspiring Innovation &amp; Collaborative Learning</p>
     </div>
@@ -60,6 +61,7 @@ import { getLeaderboard } from '../api'
 
 const loading = ref(false)
 const tableData = ref([])
+const selectedYear = ref('')
 const selectedMonth = ref('')
 
 const currentDate = computed(() => {
@@ -67,17 +69,37 @@ const currentDate = computed(() => {
   return `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日`
 })
 
+const availableYears = computed(() => {
+  const years = new Set(tableData.value.map(item => item.year).filter(year => year))
+  return Array.from(years).sort()
+})
+
 const availableMonths = computed(() => {
-  const months = new Set(tableData.value.map(item => item.month))
+  let filtered = tableData.value
+  if (selectedYear.value) {
+    filtered = tableData.value.filter(item => item.year === selectedYear.value)
+  }
+  const months = new Set(filtered.map(item => item.month))
   return Array.from(months).sort()
 })
 
 const filteredData = computed(() => {
-  if (!selectedMonth.value) {
-    return tableData.value
+  let result = tableData.value
+  
+  if (selectedYear.value) {
+    result = result.filter(item => item.year === selectedYear.value)
   }
-  return tableData.value.filter(item => item.month === selectedMonth.value)
+  
+  if (selectedMonth.value) {
+    result = result.filter(item => item.month === selectedMonth.value)
+  }
+  
+  return result
 })
+
+const handleYearChange = () => {
+  console.log('Selected year:', selectedYear.value)
+}
 
 const handleMonthChange = () => {
   console.log('Selected month:', selectedMonth.value)
@@ -89,8 +111,28 @@ const fetchData = async () => {
     const res = await getLeaderboard()
     if (res.code === 0 && res.data) {
       tableData.value = res.data.records || []
-      if (tableData.value.length > 0 && availableMonths.value.length > 0) {
-        selectedMonth.value = availableMonths.value[availableMonths.value.length - 1]
+      
+      const now = new Date()
+      const currentYear = now.getFullYear().toString()
+      const currentMonth = (now.getMonth() + 1).toString().padStart(2, '0')
+      
+      if (tableData.value.length > 0) {
+        if (availableYears.value.includes(currentYear)) {
+          selectedYear.value = currentYear
+        } else if (availableYears.value.length > 0) {
+          selectedYear.value = availableYears.value[availableYears.value.length - 1]
+        }
+        
+        if (availableMonths.value.length > 0) {
+          const currentMonthStr = availableMonths.value.find(m => 
+            m.includes(`-${currentMonth}`) || m.includes(`年${currentMonth}`)
+          )
+          if (currentMonthStr) {
+            selectedMonth.value = currentMonthStr
+          } else {
+            selectedMonth.value = availableMonths.value[availableMonths.value.length - 1]
+          }
+        }
       }
     }
   } catch (error) {
@@ -199,33 +241,28 @@ onMounted(() => {
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
-.month-selector {
+.selector-group {
   margin-bottom: 15px;
-}
-
-.month-selector h2 {
-  color: rgb(114, 188, 106);
-  font-size: 1.8rem;
-  font-weight: 600;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  gap: 15px;
 }
 
-.month-selector .el-select {
-  width: 150px;
+.selector-group .el-select {
+  width: 180px;
 }
 
-.month-selector :deep(.el-input__wrapper) {
+.selector-group :deep(.el-input__wrapper) {
   background: rgba(255, 255, 255, 0.9);
   border-radius: 8px;
   box-shadow: 0 2px 8px rgba(61, 167, 66, 0.1);
 }
 
-.month-selector :deep(.el-input__inner) {
+.selector-group :deep(.el-input__inner) {
   color: #3da742;
   font-weight: 600;
-  font-size: 1.4rem;
+  font-size: 1.2rem;
 }
 
 .header p {
@@ -380,8 +417,14 @@ onMounted(() => {
     font-size: 2.5rem;
   }
 
-  .month-selector h2 {
-    font-size: 1.4rem;
+  .selector-group {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .selector-group .el-select {
+    width: 100%;
+    max-width: 250px;
   }
 
   .ranking-table th {

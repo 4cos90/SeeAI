@@ -1,6 +1,6 @@
 import httpx
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, Dict, List
 from app.config import (
     FEISHU_APP_ID,
@@ -18,8 +18,10 @@ class FeishuService:
         self.app_id = FEISHU_APP_ID
         self.app_secret = FEISHU_APP_SECRET
         self.token: Optional[str] = None
+        self.token_expires_at: Optional[datetime] = None
         self.app_token = FEISHU_APP_TOKEN
         self.table_id = FEISHU_TABLE_ID
+        self._is_refreshing = False
         
         logger.info(f"FeishuService initialized. app_token: {self.app_token}, app_id: {self.app_id[:8] if self.app_id else 'empty'}...")
 
@@ -29,7 +31,12 @@ class FeishuService:
             timeout=30.0,
         )
 
-    async def get_tenant_access_token(self) -> str:
+    async def get_tenant_access_token(self, force_refresh: bool = False) -> str:
+        if not force_refresh and self.token and self.token_expires_at:
+            if datetime.now() < self.token_expires_at - timedelta(minutes=5):
+                logger.debug("Token still valid, no refresh needed")
+                return self.token
+        
         url = f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal"
         payload = {"app_id": self.app_id, "app_secret": self.app_secret}
         
@@ -52,11 +59,27 @@ class FeishuService:
                 raise Exception(error_msg)
                 
             self.token = data.get("tenant_access_token")
-            logger.info("Successfully obtained tenant_access_token")
+            expire_in = data.get("expire", 7200)
+            self.token_expires_at = datetime.now() + timedelta(seconds=expire_in)
+            logger.info(f"Successfully obtained tenant_access_token, expires in {expire_in}s")
             return self.token
+    
+    def _is_token_expired(self) -> bool:
+        if not self.token or not self.token_expires_at:
+            return True
+        return datetime.now() >= self.token_expires_at - timedelta(minutes=5)
+    
+    def _is_token_invalid_error(self, data: dict) -> bool:
+        if data.get("code") == 99991663:
+            return True
+        if data.get("code") == 99991400:
+            return True
+        if "Invalid access token" in str(data.get("msg", "")):
+            return True
+        return False
 
-    async def get_table_records(self, table_id: str) -> List[dict]:
-        if not self.token:
+    async def get_table_records(self, table_id: str, retry_on_401: bool = True) -> List[dict]:
+        if not self.token or self._is_token_expired():
             await self.get_tenant_access_token()
 
         url = f"{FEISHU_API_BASE}/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
@@ -81,11 +104,12 @@ class FeishuService:
                         url, headers=headers, json=payload, timeout=30
                     )
                 except httpx.HTTPStatusError as e:
-                    if e.response.status_code == 401:
+                    if e.response.status_code == 401 and retry_on_401:
                         self.token = None
+                        self.token_expires_at = None
                         logger.warning("Token expired, refreshing...")
                         await self.get_tenant_access_token()
-                        return await self.get_table_records(table_id)
+                        return await self.get_table_records(table_id, retry_on_401=False)
                     raise
 
                 logger.info(f"Records response status: {response.status_code}")
@@ -97,6 +121,13 @@ class FeishuService:
                     raise
 
                 if data.get("code") != 0:
+                    if self._is_token_invalid_error(data) and retry_on_401:
+                        self.token = None
+                        self.token_expires_at = None
+                        logger.warning(f"Token invalid (code {data.get('code')}), refreshing...")
+                        await self.get_tenant_access_token()
+                        return await self.get_table_records(table_id, retry_on_401=False)
+                    
                     error_msg = f"API error fetching records. Code: {data.get('code')}, Msg: {data.get('msg')}"
                     logger.error(error_msg)
                     raise Exception(error_msg)
@@ -115,8 +146,8 @@ class FeishuService:
         logger.info(f"Total records fetched from table {table_id}: {len(all_records)}")
         return all_records
 
-    async def get_all_tables(self) -> List[dict]:
-        if not self.token:
+    async def get_all_tables(self, retry_on_401: bool = True) -> List[dict]:
+        if not self.token or self._is_token_expired():
             await self.get_tenant_access_token()
 
         url = f"{FEISHU_API_BASE}/bitable/v1/apps/{self.app_token}/tables"
@@ -128,7 +159,17 @@ class FeishuService:
         }
 
         async with self._get_async_client() as client:
-            response = await client.get(url, headers=headers, timeout=30)
+            try:
+                response = await client.get(url, headers=headers, timeout=30)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 401 and retry_on_401:
+                    self.token = None
+                    self.token_expires_at = None
+                    logger.warning("Token expired, refreshing...")
+                    await self.get_tenant_access_token()
+                    return await self.get_all_tables(retry_on_401=False)
+                raise
+            
             logger.info(f"Get tables response status: {response.status_code}")
             
             try:
@@ -139,6 +180,13 @@ class FeishuService:
                 raise
 
             if data.get("code") != 0:
+                if self._is_token_invalid_error(data) and retry_on_401:
+                    self.token = None
+                    self.token_expires_at = None
+                    logger.warning(f"Token invalid (code {data.get('code')}), refreshing...")
+                    await self.get_tenant_access_token()
+                    return await self.get_all_tables(retry_on_401=False)
+                
                 error_msg = f"API error fetching tables. Code: {data.get('code')}, Msg: {data.get('msg')}"
                 logger.error(error_msg)
                 raise Exception(error_msg)

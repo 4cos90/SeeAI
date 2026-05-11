@@ -10,6 +10,8 @@ from app.config import (
     FEISHU_TABLE_ID,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class FeishuService:
     def __init__(self):
@@ -18,17 +20,39 @@ class FeishuService:
         self.token: Optional[str] = None
         self.app_token = FEISHU_APP_TOKEN
         self.table_id = FEISHU_TABLE_ID
+        
+        logger.info(f"FeishuService initialized. app_token: {self.app_token}, app_id: {self.app_id[:8] if self.app_id else 'empty'}...")
+
+    def _get_async_client(self) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            verify=True,
+            timeout=30.0,
+        )
 
     async def get_tenant_access_token(self) -> str:
         url = f"{FEISHU_API_BASE}/auth/v3/tenant_access_token/internal"
         payload = {"app_id": self.app_id, "app_secret": self.app_secret}
-        async with httpx.AsyncClient() as client:
+        
+        logger.info(f"Requesting tenant_access_token from: {url}")
+        
+        async with self._get_async_client() as client:
             response = await client.post(url, json=payload)
-            response.raise_for_status()
-            data = response.json()
-            if data.get("code") != 0:
-                raise Exception(f"Failed to get token: {data.get('msg')}")
+            logger.info(f"Token request status: {response.status_code}")
+            
+            try:
+                data = response.json()
+                logger.info(f"Token response: {data}")
+            except Exception:
+                logger.error(f"Token response text: {response.text}")
+                raise
+            
+            if response.status_code != 200 or data.get("code") != 0:
+                error_msg = f"Failed to get token. Status: {response.status_code}, Code: {data.get('code')}, Msg: {data.get('msg')}"
+                logger.error(error_msg)
+                raise Exception(error_msg)
+                
             self.token = data.get("tenant_access_token")
+            logger.info("Successfully obtained tenant_access_token")
             return self.token
 
     async def get_table_records(self, table_id: str) -> List[dict]:
@@ -36,6 +60,7 @@ class FeishuService:
             await self.get_tenant_access_token()
 
         url = f"{FEISHU_API_BASE}/bitable/v1/apps/{self.app_token}/tables/{table_id}/records/search"
+        logger.info(f"Fetching records from table: {table_id}, URL: {url}")
 
         headers = {
             "Authorization": f"Bearer {self.token}",
@@ -45,61 +70,82 @@ class FeishuService:
         all_records = []
         page_token = None
 
-        async with httpx.AsyncClient() as client:
-            try:
-                while True:
-                    payload = {"page_size": 500}
-                    if page_token:
-                        payload["page_token"] = page_token
+        async with self._get_async_client() as client:
+            while True:
+                payload = {"page_size": 500}
+                if page_token:
+                    payload["page_token"] = page_token
 
+                try:
                     response = await client.post(
                         url, headers=headers, json=payload, timeout=30
                     )
-                    response.raise_for_status()
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 401:
+                        self.token = None
+                        logger.warning("Token expired, refreshing...")
+                        await self.get_tenant_access_token()
+                        return await self.get_table_records(table_id)
+                    raise
+
+                logger.info(f"Records response status: {response.status_code}")
+                try:
                     data = response.json()
+                    logger.debug(f"Records response data: {data}")
+                except Exception:
+                    logger.error(f"Records response text: {response.text}")
+                    raise
 
-                    if data.get("code") != 0:
-                        raise Exception(f"API error: {data.get('msg')}")
+                if data.get("code") != 0:
+                    error_msg = f"API error fetching records. Code: {data.get('code')}, Msg: {data.get('msg')}"
+                    logger.error(error_msg)
+                    raise Exception(error_msg)
 
-                    items = data.get("data", {}).get("items", [])
-                    all_records.extend(items)
+                items = data.get("data", {}).get("items", [])
+                all_records.extend(items)
 
-                    has_more = data.get("data", {}).get("has_more", False)
-                    if not has_more:
-                        break
+                has_more = data.get("data", {}).get("has_more", False)
+                if not has_more:
+                    break
 
-                    page_token = data.get("data", {}).get("page_token")
-                    if not page_token:
-                        break
+                page_token = data.get("data", {}).get("page_token")
+                if not page_token:
+                    break
 
-                return all_records
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 401:
-                    self.token = None
-                    await self.get_tenant_access_token()
-                    return await self.get_table_records(table_id)
-                raise
+        logger.info(f"Total records fetched from table {table_id}: {len(all_records)}")
+        return all_records
 
     async def get_all_tables(self) -> List[dict]:
         if not self.token:
             await self.get_tenant_access_token()
 
         url = f"{FEISHU_API_BASE}/bitable/v1/apps/{self.app_token}/tables"
+        logger.info(f"Fetching all tables from URL: {url}")
 
         headers = {
             "Authorization": f"Bearer {self.token}",
             "Content-Type": "application/json",
         }
 
-        async with httpx.AsyncClient() as client:
+        async with self._get_async_client() as client:
             response = await client.get(url, headers=headers, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+            logger.info(f"Get tables response status: {response.status_code}")
+            
+            try:
+                data = response.json()
+                logger.info(f"Get tables response: {data}")
+            except Exception:
+                logger.error(f"Get tables response text: {response.text}")
+                raise
 
             if data.get("code") != 0:
-                raise Exception(f"API error: {data.get('msg')}")
+                error_msg = f"API error fetching tables. Code: {data.get('code')}, Msg: {data.get('msg')}"
+                logger.error(error_msg)
+                raise Exception(error_msg)
 
-            return data.get("data", {}).get("items", [])
+            tables = data.get("data", {}).get("items", [])
+            logger.info(f"Total tables found: {len(tables)}")
+            return tables
 
     async def get_leaderboard_data(self) -> dict:
         all_records = []
